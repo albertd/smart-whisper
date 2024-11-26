@@ -6,7 +6,7 @@ struct smart_whisper_transcribe_params {
 
 struct whisper_full_params whisper_full_params_from_js(Napi::Object o) {
     struct whisper_full_params params =
-        whisper_full_default_params(whisper_sampling_strategy::WHISPER_SAMPLING_BEAM_SEARCH);
+        whisper_full_default_params(whisper_sampling_strategy::WHISPER_SAMPLING_GREEDY);
 
     if (o.Has("strategy")) {
         params.strategy = static_cast<whisper_sampling_strategy>(
@@ -181,18 +181,17 @@ class TranscribeWorker : public Napi::AsyncProgressQueueWorker<int> {
     }
 
     void Execute(const ExecutionProgress& progress) override {
-        state = whisper_init_state(context);
 
         params.new_segment_callback = [](struct whisper_context* ctx, struct whisper_state* state,
                                          int n_new, void* user_data) {
             const ExecutionProgress& progress = *(ExecutionProgress*)user_data;
 
-            const int i = whisper_full_n_segments_from_state(state) - 1;
+            const int i = whisper_full_n_segments(ctx) - 1;
             progress.Send(&i, 1);
         };
         params.new_segment_callback_user_data = (void*)&progress;
 
-        int err = whisper_full_with_state(context, state, params, samples, n_samples);
+        int err = whisper_full(context, params, samples, n_samples);
         if (err != 0) {
             SetError("whisper_full operation failed");
         }
@@ -209,23 +208,23 @@ class TranscribeWorker : public Napi::AsyncProgressQueueWorker<int> {
 
         Napi::Object segment = Napi::Object::New(Env());
         segment.Set("from", Napi::Number::New(
-                                Env(), whisper_full_get_segment_t0_from_state(state, i) * 10));
+                                Env(), whisper_full_get_segment_t0(context, i) * 10));
         segment.Set(
-            "to", Napi::Number::New(Env(), whisper_full_get_segment_t1_from_state(state, i) * 10));
+            "to", Napi::Number::New(Env(), whisper_full_get_segment_t1(context, i) * 10));
         segment.Set("text",
-                    Napi::String::New(Env(), whisper_full_get_segment_text_from_state(state, i)));
+                    Napi::String::New(Env(), whisper_full_get_segment_text(context, i)));
 
         if (strcmp(smart_params.format, "detail") == 0) {
             float       confidence = 0, min_p = 1, max_p = 0;
             int         skips = 0;
-            int         tokens = whisper_full_n_tokens_from_state(state, i);
+            int         tokens = whisper_full_n_tokens(context, i);
             Napi::Array tokens_array = Napi::Array::New(Env(), tokens);
             for (int j = 0; j < tokens; j++) {
-                auto         token = whisper_full_get_token_data_from_state(state, i, j);
+                auto         token = whisper_full_get_token_data(context, i, j);
                 Napi::Object token_object = Napi::Object::New(Env());
                 token_object.Set("text",
-                                 Napi::String::New(Env(), whisper_full_get_token_text_from_state(
-                                                              context, state, i, j)));
+                                 Napi::String::New(Env(), whisper_full_get_token_text(
+                                                              context, i, j)));
                 token_object.Set("id", Napi::Number::New(Env(), token.id));
                 token_object.Set("p", Napi::Number::New(Env(), token.p));
                 tokens_array.Set(j, token_object);
@@ -247,7 +246,7 @@ class TranscribeWorker : public Napi::AsyncProgressQueueWorker<int> {
 
             segment.Set(
                 "lang",
-                Napi::String::New(Env(), whisper_lang_str(whisper_full_lang_id_from_state(state))));
+                Napi::String::New(Env(), whisper_lang_str(whisper_full_lang_id(context))));
             segment.Set("confidence", Napi::Number::New(Env(), confidence));
             segment.Set("tokens", tokens_array);
         }
@@ -258,28 +257,28 @@ class TranscribeWorker : public Napi::AsyncProgressQueueWorker<int> {
     void OnOK() override {
         Napi::HandleScope scope(Env());
 
-        int         n_segments = whisper_full_n_segments_from_state(state);
+        int         n_segments = whisper_full_n_segments(context);
         Napi::Array segments = Napi::Array::New(Env(), n_segments);
         for (int i = 0; i < n_segments; i++) {
             Napi::Object segment = Napi::Object::New(Env());
             segment.Set("from", Napi::Number::New(
-                                    Env(), whisper_full_get_segment_t0_from_state(state, i) * 10));
+                                    Env(), whisper_full_get_segment_t0(context, i) * 10));
             segment.Set("to", Napi::Number::New(
-                                  Env(), whisper_full_get_segment_t1_from_state(state, i) * 10));
+                                  Env(), whisper_full_get_segment_t1(context, i) * 10));
             segment.Set("text", Napi::String::New(
-                                    Env(), whisper_full_get_segment_text_from_state(state, i)));
+                                    Env(), whisper_full_get_segment_text(context, i)));
 
             if (strcmp(smart_params.format, "detail") == 0) {
                 float       confidence = 0, min_p = 1, max_p = 0;
                 int         skips = 0;
-                int         tokens = whisper_full_n_tokens_from_state(state, i);
+                int         tokens = whisper_full_n_tokens(context, i);
                 Napi::Array tokens_array = Napi::Array::New(Env(), tokens);
                 for (int j = 0; j < tokens; j++) {
-                    auto         token = whisper_full_get_token_data_from_state(state, i, j);
+                    auto         token = whisper_full_get_token_data(context, i, j);
                     Napi::Object token_object = Napi::Object::New(Env());
                     token_object.Set(
-                        "text", Napi::String::New(Env(), whisper_full_get_token_text_from_state(
-                                                             context, state, i, j)));
+                        "text", Napi::String::New(Env(), whisper_full_get_token_text(
+                                                             context, i, j)));
                     token_object.Set("id", Napi::Number::New(Env(), token.id));
                     token_object.Set("p", Napi::Number::New(Env(), token.p));
                     if (params.token_timestamps) {
@@ -306,7 +305,7 @@ class TranscribeWorker : public Napi::AsyncProgressQueueWorker<int> {
 
                 segment.Set("lang",
                             Napi::String::New(
-                                Env(), whisper_lang_str(whisper_full_lang_id_from_state(state))));
+                                Env(), whisper_lang_str(whisper_full_lang_id(context))));
                 segment.Set("confidence", Napi::Number::New(Env(), confidence));
                 segment.Set("tokens", tokens_array);
             }

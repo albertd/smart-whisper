@@ -7,7 +7,7 @@ class LoadModelWorker : public PromiseWorker {
         : PromiseWorker(env), model_path(model_path), params(params) {}
 
     void Execute() override {
-        context = whisper_init_from_file_with_params_no_state(model_path.c_str(), params);
+        context = whisper_init_from_file_with_params(model_path.c_str(), params);
         if (context == nullptr) {
             SetError("Failed to initialize whisper context");
         }
@@ -99,7 +99,7 @@ Napi::Value WhisperModel::Load(const Napi::CallbackInfo &info) {
 
     std::string model_path = info[0].As<Napi::String>();
 
-    whisper_context_params params;
+    whisper_context_params params = whisper_context_default_params();
     params.use_gpu = info.Length() == 2 ? info[1].As<Napi::Boolean>() : true;
 
     auto worker = new LoadModelWorker(env, model_path, params);
